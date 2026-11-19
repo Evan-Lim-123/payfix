@@ -509,7 +509,5 @@ dash_page = st.Page(dashboard, title="Dashboard", icon="📊")
 
 with st.sidebar:
     st.markdown("### Pay**Fix**")
-    st.caption(f"Officer: {data.OFFICER}")
-    st.caption("Synthetic data only. Prototype for the OCBC Ignite Innovation Challenge.")
 
 st.navigation([sim_page, risk_page, queue_page, case_page, dash_page]).run()
