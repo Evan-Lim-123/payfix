@@ -259,6 +259,31 @@ def investigate(p, code, api_key, model=None, client=None):
     }
 
 
+def ping(api_key, model=None, client=None):
+    """Send one tiny request to check the key and model. Returns (ok, message)."""
+    try:
+        from google import genai
+        from google.genai import errors, types
+    except ImportError:
+        return False, ("The google-genai package isn't installed. Make sure requirements.txt on GitHub "
+                       "includes the line: google-genai>=3.0")
+    client = client or genai.Client(api_key=api_key, http_options=types.HttpOptions(timeout=20_000))
+    models = ([model] if model else []) + [m for m in DEFAULT_MODELS if m != model]
+    tried = []
+    for m in models:
+        try:
+            resp = client.models.generate_content(model=m, contents="Reply with the single word OK.")
+            return True, f"Gemini is working. Model: {m}. Reply: {(resp.text or '').strip()[:40]}"
+        except errors.ClientError as e:
+            if getattr(e, "code", None) == 404:
+                tried.append(m)
+                continue
+            return False, f"{_short_error(e)} (model {m})"
+        except Exception as e:
+            return False, f"{type(e).__name__}: {str(e)[:150]}"
+    return False, "None of these models are available to your key: " + ", ".join(tried)
+
+
 def _parse(text):
     """Parse Gemini's JSON answer. Raises ValueError if there is no usable JSON."""
     text = (text or "").strip()
@@ -286,7 +311,7 @@ def _short_error(e):
     code = getattr(e, "code", None)
     if code == 429:
         return "free-tier rate limit reached (429)"
-    if code in (401, 403):
-        return "API key rejected"
     msg = str(getattr(e, "message", "") or e)
+    if code in (401, 403) or "API key not valid" in msg or "API_KEY_INVALID" in msg:
+        return "API key rejected (check it was copied fully, with no spaces)"
     return f"{code or ''} {msg[:120]}".strip()
