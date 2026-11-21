@@ -80,6 +80,28 @@ st.markdown(
     .pf-brand {font-family:"Space Grotesk", sans-serif; font-size:1.6rem; font-weight:700; color:#FFFFFF; line-height:1;}
     .pf-brand em {font-style:normal; color:#5FD3C3;}
     .pf-tag {font-size:12px; color:#9AA3B2; margin:6px 0 2px;}
+
+    /* Dark sidebar and teal accents, even if .streamlit/config.toml is missing */
+    [data-testid="stSidebar"], [data-testid="stSidebarContent"] {background-color:#141922 !important;}
+    [data-testid="stSidebar"] [data-testid="stNavSectionHeader"],
+    [data-testid="stSidebar"] [data-testid="stNavSectionHeader"] * {color:#9AA3B2 !important;}
+    [data-testid="stSidebarNavLink"] span, [data-testid="stSidebarNavLink"] [data-testid="stIconMaterial"]
+        {color:#C9CED8 !important;}
+    [data-testid="stSidebarNavLink"]:hover {background-color:#232A36 !important;}
+    [data-testid="stSidebarNavLink"][aria-current="page"] {background-color:#232A36 !important;}
+    [data-testid="stSidebarNavLink"][aria-current="page"] span {color:#FFFFFF !important; font-weight:600;}
+    [data-testid="stSidebarNavSeparator"], [data-testid="stSidebar"] hr {border-color:#2E3644 !important;}
+    [data-testid="stSidebar"] [data-testid="stCaptionContainer"],
+    [data-testid="stSidebar"] [data-testid="stCaptionContainer"] p {color:#9AA3B2 !important;}
+    [data-testid="stSidebar"] [data-testid="stWidgetLabel"] p,
+    [data-testid="stSidebar"] .stCheckbox p {color:#E6E9EE !important;}
+    [data-testid="stSidebarCollapseButton"] [data-testid="stIconMaterial"] {color:#9AA3B2 !important;}
+    [data-testid="stBaseButton-primary"] {background-color:#0B6E63 !important; border-color:#0B6E63 !important;
+                                          color:#FFFFFF !important;}
+    [data-testid="stBaseButton-primary"]:hover {background-color:#08524A !important; border-color:#08524A !important;}
+    button[data-variant="segmented_control"][aria-checked="true"] {background-color:#E3F1EF !important;
+        border-color:#0B6E63 !important; color:#0B6E63 !important;}
+    button[data-variant="segmented_control"][aria-checked="true"] * {color:#0B6E63 !important;}
     </style>
     """,
     unsafe_allow_html=True,
@@ -692,10 +714,13 @@ with st.sidebar:
         st.caption(f"🟢 Gemini agent on (key …{key_end}). If a call fails, the case says so and uses rules."
                    if st.session_state.use_ai else "⚪ Rule-based agent (Gemini switched off)")
         if st.button("Test Gemini", help="Sends one tiny request to check the key and model"):
-            with st.spinner("Contacting Gemini…"):
-                ok, msg = agent.ping(agent.get_setting("GEMINI_API_KEY", st.secrets),
-                                     agent.get_setting("GEMINI_MODEL", st.secrets))
-            (st.success if ok else st.error)(msg)
+            if not hasattr(agent, "ping"):
+                st.error("agent.py on GitHub is an older version. Upload the latest agent.py.")
+            else:
+                with st.spinner("Contacting Gemini…"):
+                    ok, msg = agent.ping(agent.get_setting("GEMINI_API_KEY", st.secrets),
+                                         agent.get_setting("GEMINI_MODEL", st.secrets))
+                (st.success if ok else st.error)(msg)
     else:
         st.caption("⚪ Rule-based agent · add GEMINI_API_KEY in Secrets to use Gemini")
 
