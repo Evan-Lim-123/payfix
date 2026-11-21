@@ -98,6 +98,34 @@ def current_status(case):
     return st.session_state.decisions.get(case["id"], case["status"])
 
 
+def record_decision(case, decision, reason):
+    """Apply an officer decision: move the case, simulate the action, log everything."""
+    now = datetime.now(sim.SGT).strftime("%H:%M")
+    log = st.session_state.audit[case["id"]]
+    status = f"{decision} by {data.OFFICER}"
+    log.append((now, data.OFFICER, f"{status}." + (f" Reason: {reason}" if reason else "")))
+
+    if decision in ("Approved", "Edited"):
+        case["group"] = "resolved"
+        done = case["action"] if decision == "Approved" else f"{case['action']} (with officer's changes: {reason})"
+        log.append((now, "PayFix", f"Action carried out (simulated): {done}"))
+        if case.get("message"):
+            log.append((now, "PayFix", "Customer SMS sent (simulated)."))
+        status += " · action carried out"
+    elif decision == "Rejected":
+        case["group"] = "resolved"
+        log.append((now, "PayFix", "No action taken. Case closed."))
+        status += " · no action taken"
+    else:  # Escalated
+        case["group"] = "escalated"
+        log.append((now, "PayFix", "Case sent to a senior officer. No action taken."))
+        status += " · sent to senior officer"
+
+    st.session_state.decisions[case["id"]] = status
+    case["status"] = status
+    st.session_state.toast = f"{case['id']}: {status}"
+
+
 def open_case(case_id):
     st.session_state.selected = case_id
     st.switch_page(case_page)
@@ -112,19 +140,21 @@ def queue():
 
     cases = st.session_state.cases
     groups = [c["group"] for c in cases]
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Failed payments in queue", len(cases))
+    c1, c2, c3, c4, c5 = st.columns(5)
+    c1.metric("Failed payments", len(cases))
     c2.metric("Auto-resolved by PayFix", groups.count("auto"))
     c3.metric("Waiting for an officer", groups.count("review"))
     c4.metric("Escalated (high risk)", groups.count("escalated"))
+    c5.metric("Resolved by officer", groups.count("resolved"))
     if not any(c.get("simulated") for c in cases):
         st.info("Showing sample cases only. Go to **Live simulation** to generate fake payments.")
 
     choice = st.segmented_control(
-        "Filter", ["All cases", "Needs an officer", "Auto-resolved", "Escalated"],
+        "Filter", ["All cases", "Needs an officer", "Auto-resolved", "Escalated", "Resolved by officer"],
         default="All cases", label_visibility="collapsed",
     )
-    group = {"Needs an officer": "review", "Auto-resolved": "auto", "Escalated": "escalated"}.get(choice)
+    group = {"Needs an officer": "review", "Auto-resolved": "auto", "Escalated": "escalated",
+             "Resolved by officer": "resolved"}.get(choice)
     shown = [c for c in cases if group is None or c["group"] == group]
 
     df = pd.DataFrame(
@@ -235,14 +265,17 @@ def case_detail():
             st.markdown("**Policy checks (rules, not AI)**")
             for text, ok in case["checks"]:
                 st.markdown(f"{'✅' if ok else '⛔'} {text}")
-            if case["group"] == "review":
+            decided = st.session_state.decisions.get(case_id)
+            if case["group"] == "resolved":
+                st.success(f"Resolved by an officer: {decided}.")
+            elif case["group"] == "review":
                 st.warning(f"{case['risk']} risk: PayFix has prepared the fix, but an officer must approve it.")
             elif case["group"] == "escalated":
                 st.error("High risk: a person must decide. PayFix will not act on this case.")
             else:
                 st.success("Low risk: PayFix resolved this automatically.")
 
-        if case["group"] != "auto":
+        if case["group"] != "auto" and not decided:
             with st.container(border=True):
                 st.subheader("Your decision")
                 reason = st.text_area("Reason (required if you edit, reject or escalate)",
@@ -264,17 +297,24 @@ def case_detail():
                     if clicked != "Approved" and not reason.strip():
                         st.error("Please give a reason before you edit, reject or escalate.")
                     else:
-                        status = f"{clicked} by {data.OFFICER}"
-                        st.session_state.decisions[case_id] = status
-                        note = f"{status}." + (f" Reason: {reason.strip()}" if reason.strip() else "")
-                        st.session_state.audit[case_id].append((datetime.now().strftime("%H:%M"), data.OFFICER, note))
+                        record_decision(case, clicked, reason.strip())
                         st.rerun()
+        elif decided:
+            with st.container(border=True):
+                st.subheader("Decision recorded")
+                st.markdown(f"**{decided}**")
+                st.caption("This case is locked. The decision and what PayFix did are in the audit trail.")
 
         if case["message"]:
             with st.container(border=True):
                 st.subheader("Customer message preview (SMS)")
                 st.markdown(f"<div class='sms'>{case['message']}</div>", unsafe_allow_html=True)
-                st.caption("Sent only after an officer approves. PayFix never asks customers for passwords or login links.")
+                if decided and decided.startswith(("Approved", "Edited")):
+                    st.caption("✅ Sent to the customer (simulated). PayFix never asks customers for passwords or login links.")
+                elif decided:
+                    st.caption("Not sent: the officer did not approve this case.")
+                else:
+                    st.caption("Sent only after an officer approves. PayFix never asks customers for passwords or login links.")
 
 
 # ---------------------------------------------------------------------------
@@ -298,7 +338,7 @@ def session_stats():
         "paid": sum(1 for f in feed if f["Outcome"] == "Paid"),
         "failed": len(simc),
         "auto": sum(1 for c in simc if c["group"] == "auto"),
-        "review": sum(1 for c in simc if c["group"] == "review"),
+        "review": sum(1 for c in simc if c["group"] in ("review", "resolved")),
         "escalated": sum(1 for c in simc if c["group"] == "escalated"),
         "accuracy": (1 - len(wrong) / len(simc)) if simc else None,
         "mistakes": len(wrong),
@@ -344,12 +384,23 @@ def simulation():
             bar = st.progress(0.0, text="Processing payments…")
             table = st.empty()
             before = len([c for c in st.session_state.cases if c.get("simulated")])
-            ai_left = AI_CASES_PER_BATCH if ai_investigator() else 0
+            ai_on = ai_investigator() is not None
+            ai_left = AI_CASES_PER_BATCH if ai_on else 0
+            gemini_error = None
             for i in range(size):
+                was_left = ai_left
                 _, case, _ = add_simulated(sim.random_payment(st.session_state.rng, rate), use_ai=ai_left > 0)
-                if case is not None and ai_left > 0:
-                    # Stop calling Gemini for this batch if it fell back (e.g. rate limit)
-                    ai_left = ai_left - 1 if case["engine"].startswith("Gemini") else 0
+                if case is not None and ai_on and was_left == 0:
+                    why = (f"Gemini skipped: it failed earlier in this batch ({gemini_error})" if gemini_error
+                           else f"Gemini skipped: batch limit of {AI_CASES_PER_BATCH} reached")
+                    case["engine"], case["engine_note"] = "Rule-based agent", why + "."
+                if case is not None and was_left > 0:
+                    if case["engine"].startswith("Gemini"):
+                        ai_left -= 1
+                    else:
+                        # Stop calling Gemini for this batch if it failed (e.g. rate limit, bad key)
+                        ai_left = 0
+                        gemini_error = case["engine_note"].split("unavailable (", 1)[-1].rsplit(")", 1)[0]
                     bar.progress((i + 1) / size, text=f"Processed {i + 1} of {size} payments "
                                                       f"(Gemini investigating failures…)")
                 if live and (i % 2 == 0 or i == size - 1):
@@ -361,7 +412,10 @@ def simulation():
                 0, len([c for c in st.session_state.cases if c.get("simulated")]) - before)]
             n_ai = sum(1 for c in new_cases if c["engine"].startswith("Gemini"))
             note = f"Batch done: {size} payments, {len(new_cases)} failed and went through PayFix."
-            if ai_investigator():
+            if ai_on and gemini_error:
+                note += (f" ⚠️ Gemini failed on the first try ({gemini_error}), so this batch used the "
+                         "rule-based agent. Click **Test Gemini** in the sidebar for details.")
+            elif ai_on:
                 note += (f" Gemini investigated {n_ai}; the rest used the rule-based agent "
                          f"(capped at {AI_CASES_PER_BATCH} per batch to stay within free-tier limits).")
             st.session_state.batch_note = note
@@ -552,9 +606,18 @@ with st.sidebar:
     if agent.available(st.secrets):
         st.toggle("Use Gemini agent", value=True, key="use_ai",
                   help="Off = use the offline rule-based agent. Useful if you hit the free-tier limit.")
-        st.caption("🟢 Gemini agent on (key set). If a call fails, the case says so and uses rules."
-                   if st.session_state.use_ai else "⚪ Rule-based agent")
+        key_end = agent.get_setting("GEMINI_API_KEY", st.secrets).strip()[-4:]
+        st.caption(f"🟢 Gemini agent on (key …{key_end}). If a call fails, the case says so and uses rules."
+                   if st.session_state.use_ai else "⚪ Rule-based agent (Gemini switched off)")
+        if st.button("Test Gemini", help="Sends one tiny request to check the key and model"):
+            with st.spinner("Contacting Gemini…"):
+                ok, msg = agent.ping(agent.get_setting("GEMINI_API_KEY", st.secrets),
+                                     agent.get_setting("GEMINI_MODEL", st.secrets))
+            (st.success if ok else st.error)(msg)
     else:
         st.caption("⚪ Rule-based agent · add GEMINI_API_KEY in Secrets to use Gemini")
+
+if st.session_state.get("toast"):
+    st.toast(st.session_state.pop("toast"), icon="✅")
 
 st.navigation([sim_page, risk_page, queue_page, case_page, dash_page]).run()
