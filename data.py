@@ -260,7 +260,7 @@ KPIS = [
     ("Failures prevented", "47", "fixed after a reminder"),
     ("Correct root cause", "89%", "AI vs ground truth"),
     ("Wrong auto-actions", "0", "target: always zero"),
-    ("Avg time to resolve", "14 min", "manual baseline: [TO MEASURE]"),
+    ("Avg time to resolve", "14 min", "from failure to decision"),
     ("Officer agreement", "91%", "accepted AI suggestion"),
 ]
 
