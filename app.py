@@ -4,6 +4,7 @@ Prototype for the OCBC Ignite Innovation Challenge (Problem 2). Uses synthetic
 data only. Run with:  streamlit run app.py
 """
 
+import base64
 import random
 import time
 from datetime import datetime
@@ -35,19 +36,77 @@ RISK_COLOURS = {
 st.markdown(
     """
     <style>
-    .pill {display:inline-block;padding:3px 10px;border-radius:999px;font-size:12px;font-weight:600}
-    .card {background:#FFFFFF;border:1px solid #E1E4EA;border-radius:12px;padding:18px 20px;margin-bottom:12px}
-    .muted {color:#5A6372;font-size:14px}
-    .sms {background:#EEF6F5;border-radius:12px 12px 12px 4px;padding:14px 16px;color:#12332F;line-height:1.55}
+    /* Layout */
+    .block-container {padding-top: 2.2rem; padding-bottom: 3rem; max-width: 1280px;}
+    [data-testid="stHeader"] {background: transparent;}
+    footer {visibility: hidden;}
+
+    /* Page header */
+    .pf-hero {display:flex; flex-wrap:wrap; justify-content:space-between; align-items:flex-end; gap:12px;
+              margin: 0 0 1.4rem; padding-bottom: 1.1rem; border-bottom: 1px solid #E1E4EA;}
+    .pf-eyebrow {font-size:12px; font-weight:600; letter-spacing:.08em; text-transform:uppercase; color:#0B6E63;
+                 margin-bottom:4px;}
+    .pf-hero h1.pf-title {padding:0 !important;}
+    .pf-title {font-family:"Space Grotesk", sans-serif; font-size:2.1rem; font-weight:700; line-height:1.15;
+               color:#141922; margin:0;}
+    .pf-sub {color:#5A6372; font-size:15px; margin:6px 0 0; max-width:760px; line-height:1.5;}
+    .pf-chip {display:inline-flex; align-items:center; gap:6px; font-size:12px; font-weight:600; color:#2E3644;
+              background:#FFFFFF; border:1px solid #E1E4EA; border-radius:999px; padding:5px 12px; white-space:nowrap;}
+    .pf-dot {width:8px; height:8px; border-radius:50%; background:#0B6E63; display:inline-block;}
+
+    /* Metric cards */
+    [data-testid="stMetric"] {background:#FFFFFF; border:1px solid #E1E4EA; border-radius:12px; padding:14px 18px;
+                              box-shadow: 0 1px 2px rgba(20,25,34,.04);}
+    [data-testid="stMetricLabel"] p {font-size:13px !important; color:#5A6372 !important;}
+    [data-testid="stMetricValue"] {font-family:"Space Grotesk", sans-serif; font-weight:600;}
+
+    /* Bordered containers become cards */
+    [data-testid="stVerticalBlockBorderWrapper"]:has(> div > [data-testid="stVerticalBlock"]) {background:#FFFFFF;}
+    h3 {font-size:1.15rem !important;}
+
+    /* Case header */
+    .pf-case {background:#FFFFFF; border:1px solid #E1E4EA; border-radius:14px; padding:20px 24px; margin-bottom:1.2rem;}
+    .pf-case-top {display:flex; flex-wrap:wrap; align-items:center; gap:10px; margin-bottom:14px;}
+    .pf-case-id {font-family:"Space Grotesk", sans-serif; font-size:1.6rem; font-weight:700; color:#141922; margin-right:6px;}
+    .pf-facts {display:grid; grid-template-columns:repeat(auto-fit, minmax(160px, 1fr)); gap:14px;}
+    .pf-fact span {display:block; font-size:12px; font-weight:600; letter-spacing:.04em; text-transform:uppercase;
+                   color:#5A6372; margin-bottom:2px;}
+    .pf-fact b {font-size:15px; font-weight:600; color:#141922;}
+
+    /* Small pieces */
+    .pill {display:inline-block; padding:3px 10px; border-radius:999px; font-size:12px; font-weight:600;}
+    .muted {color:#5A6372; font-size:14px;}
+    .sms {background:#EEF6F5; border-radius:14px 14px 14px 4px; padding:14px 16px; color:#12332F; line-height:1.55;}
+    .pf-brand {font-family:"Space Grotesk", sans-serif; font-size:1.6rem; font-weight:700; color:#FFFFFF; line-height:1;}
+    .pf-brand em {font-style:normal; color:#5FD3C3;}
+    .pf-tag {font-size:12px; color:#9AA3B2; margin:6px 0 2px;}
     </style>
     """,
     unsafe_allow_html=True,
 )
 
 
-def pill(text):
-    bg, fg = RISK_COLOURS.get(text, ("#E8EBF0", "#2E3644"))
+def pill(text, colour_key=None):
+    bg, fg = RISK_COLOURS.get(colour_key or text, ("#E8EBF0", "#2E3644"))
     return f'<span class="pill" style="background:{bg};color:{fg}">{text}</span>'
+
+
+def page_header(eyebrow, title, subtitle):
+    st.markdown(
+        f"""<div class="pf-hero"><div><div class="pf-eyebrow">{eyebrow}</div>
+        <h1 class="pf-title">{title}</h1><p class="pf-sub">{subtitle}</p></div>
+        <span class="pf-chip"><span class="pf-dot"></span>Synthetic data only</span></div>""",
+        unsafe_allow_html=True,
+    )
+
+
+STATUS_COLOURS = {"auto": ("#E3F4EA", "#1B5E36"), "review": ("#FCEFD7", "#7A4A05"),
+                  "escalated": ("#FBE3E1", "#8E1F17"), "resolved": ("#E3F4EA", "#1B5E36")}
+
+
+def status_pill(case):
+    bg, fg = STATUS_COLOURS.get(case["group"], ("#E8EBF0", "#2E3644"))
+    return f'<span class="pill" style="background:{bg};color:{fg}">{current_status(case)}</span>'
 
 
 # ---------------------------------------------------------------------------
@@ -135,14 +194,14 @@ def open_case(case_id):
 # Page 1: failed payments queue
 # ---------------------------------------------------------------------------
 def queue():
-    st.title("Failed payments")
-    st.caption(f"Loan repayments and recurring GIRO payments that failed today, {sim.now():%a %d %b %Y}")
+    page_header("Operations · Case queue", "Failed payments",
+                f"Loan repayments and recurring GIRO payments that failed today, {sim.now():%a %d %b %Y}.")
 
     cases = st.session_state.cases
     groups = [c["group"] for c in cases]
     c1, c2, c3, c4, c5 = st.columns(5)
     c1.metric("Failed payments", len(cases))
-    c2.metric("Auto-resolved by PayFix", groups.count("auto"))
+    c2.metric("Auto-resolved", groups.count("auto"))
     c3.metric("Waiting for an officer", groups.count("review"))
     c4.metric("Escalated (high risk)", groups.count("escalated"))
     c5.metric("Resolved by officer", groups.count("resolved"))
@@ -199,18 +258,29 @@ def queue():
 # Page 2: case detail and officer decision
 # ---------------------------------------------------------------------------
 def case_detail():
+    page_header("Operations · Case detail", "Case investigation",
+                "What the agent found, the rules it was checked against, and the officer's decision.")
     ids = [c["id"] for c in st.session_state.cases]
     if st.session_state.selected not in ids:
         st.session_state.selected = ids[0]
-    case_id = st.selectbox("Case", ids, index=ids.index(st.session_state.selected),
-                           format_func=lambda i: f"{i} · {case_by_id(i)['type']}")
+    pick_col, _ = st.columns([2, 3])
+    case_id = pick_col.selectbox("Case", ids, index=ids.index(st.session_state.selected),
+                                 format_func=lambda i: f"{i} · {case_by_id(i)['type']}")
     st.session_state.selected = case_id
     case = case_by_id(case_id)
 
-    st.markdown(f"## {case['id']} · {case['type']} &nbsp; {pill(case['risk'] + ' risk')}", unsafe_allow_html=True)
+    agent_name = case.get("engine") or "Investigation agent"
     st.markdown(
-        f"<p class='muted'>{case['customer']} · S${case['amount']:,.2f} · rejection code {case['code']} "
-        f"({case['failure']}) · <b>Status: {current_status(case)}</b></p>",
+        f"""<div class="pf-case"><div class="pf-case-top">
+        <span class="pf-case-id">{case['id']}</span>{pill(case['risk'] + ' risk', case['risk'])}{status_pill(case)}
+        </div><div class="pf-facts">
+        <div class="pf-fact"><span>Payment</span><b>{case['type']}</b></div>
+        <div class="pf-fact"><span>Customer</span><b>{case['customer']}</b></div>
+        <div class="pf-fact"><span>Amount</span><b>S${case['amount']:,.2f}</b></div>
+        <div class="pf-fact"><span>Rejection code</span><b>{case['code']}</b></div>
+        <div class="pf-fact"><span>Likely cause</span><b>{case['failure']}</b></div>
+        <div class="pf-fact"><span>Investigated by</span><b>{agent_name}</b></div>
+        </div></div>""",
         unsafe_allow_html=True,
     )
 
@@ -355,23 +425,22 @@ def show_session_results():
     r1[0].metric("Payments processed", s["processed"])
     r1[1].metric("Paid first time", s["paid"])
     r1[2].metric("Failed", s["failed"])
-    r1[3].metric("Auto-resolved by PayFix", s["auto"])
+    r1[3].metric("Auto-resolved", s["auto"])
     r2 = st.columns(4)
     r2[0].metric("Sent to an officer", s["review"] + s["escalated"],
                  help=f"{s['review']} for review, {s['escalated']} escalated")
-    r2[1].metric("Agent found the right cause", "—" if s["accuracy"] is None else f"{s['accuracy']:.0%}",
+    r2[1].metric("Correct cause found", "—" if s["accuracy"] is None else f"{s['accuracy']:.0%}",
                  help="Compared with the simulation's ground truth, which the agent never sees")
-    r2[2].metric("Agent mistakes stopped before action", f"{s['caught']} of {s['mistakes']}",
+    r2[2].metric("AI mistakes stopped", f"{s['caught']} of {s['mistakes']}",
                  help="Wrong causes that were blocked by the rules or sent to a person instead of acted on")
     r2[3].metric("Wrong auto-actions", s["wrong_auto"], help="Target: always zero")
     return s
 
 
 def simulation():
-    st.title("Live simulation")
-    st.caption("Generate fake loan, GIRO and standing-instruction payments and watch PayFix handle the failures: "
-               "detect → agent investigates → policy rules check → auto-resolve or send to an officer. "
-               "All data is invented.")
+    page_header("Demo · Live simulation", "Watch PayFix work",
+                "Generate loan, GIRO and standing-instruction payments, then follow every failure through "
+                "PayFix: detect → investigate → validate → resolve or escalate → notify.")
 
     # --- Batch run --------------------------------------------------------
     with st.container(border=True):
@@ -496,9 +565,9 @@ def simulation():
 # Page 3: upcoming payments at risk
 # ---------------------------------------------------------------------------
 def at_risk():
-    st.title("Upcoming payments at risk")
-    st.caption("Scheduled loan and GIRO payments in the next 7 days that PayFix expects to fail. "
-               "PayFix only sends reminders; it never moves money.")
+    page_header("Proactive · Next 7 days", "Upcoming payments at risk",
+                "Scheduled loan and GIRO payments that PayFix expects to fail. Fix them before the due date. "
+                "PayFix only sends reminders; it never moves money.")
 
     for item in data.AT_RISK:
         with st.container(border=True):
@@ -523,7 +592,8 @@ def at_risk():
 # Page 4: process owner dashboard
 # ---------------------------------------------------------------------------
 def dashboard():
-    st.title("How PayFix is performing")
+    page_header("Process owner · Dashboard", "How PayFix is performing",
+                "Live results from this session's simulation, plus sample weekly figures.")
 
     if any(c.get("simulated") for c in st.session_state.cases):
         with st.container(border=True):
@@ -545,10 +615,11 @@ def dashboard():
     st.subheader("Sample weekly figures")
     st.caption("Week of 10–16 Nov 2026 · sample results from a test run on synthetic cases with known causes")
 
-    cols = st.columns(len(data.KPIS))
-    for col, (label, value, note) in zip(cols, data.KPIS):
-        col.metric(label, value, help=note)
-        col.caption(note)
+    for start in range(0, len(data.KPIS), 3):
+        cols = st.columns(3)
+        for col, (label, value, note) in zip(cols, data.KPIS[start:start + 3]):
+            col.metric(label, value)
+            col.caption(note)
 
     left, right = st.columns([3, 2], gap="large")
 
@@ -561,7 +632,7 @@ def dashboard():
                 .mark_bar(color="#0B6E63", cornerRadiusEnd=4)
                 .encode(
                     x=alt.X("Share (%):Q", title="Share of failures (%)"),
-                    y=alt.Y("Failure:N", sort="-x", title=None),
+                    y=alt.Y("Failure:N", sort="-x", title=None, axis=alt.Axis(labelLimit=220)),
                     tooltip=["Failure", "Share (%)"],
                 )
                 .properties(height=320)
@@ -574,11 +645,12 @@ def dashboard():
             res = pd.DataFrame({"Route": list(data.RESOLUTION_MIX), "Share (%)": list(data.RESOLUTION_MIX.values())})
             donut = (
                 alt.Chart(res)
-                .mark_arc(innerRadius=60)
+                .mark_arc(innerRadius=58, outerRadius=100)
                 .encode(
                     theta="Share (%):Q",
-                    color=alt.Color("Route:N", scale=alt.Scale(range=["#0B6E63", "#6FB8AE", "#C9CED8"]),
-                                    legend=alt.Legend(orient="bottom", title=None)),
+                    color=alt.Color("Route:N", scale=alt.Scale(domain=list(data.RESOLUTION_MIX),
+                                                                range=["#0B6E63", "#6FB8AE", "#C9CED8"]),
+                                    legend=alt.Legend(orient="bottom", title=None, columns=1, labelLimit=260)),
                     tooltip=["Route", "Share (%)"],
                 )
                 .properties(height=260)
@@ -595,14 +667,24 @@ def dashboard():
 # ---------------------------------------------------------------------------
 # Navigation
 # ---------------------------------------------------------------------------
-sim_page = st.Page(simulation, title="Live simulation", icon="▶️", default=True)
-queue_page = st.Page(queue, title="Failed payments", icon="📥")
-case_page = st.Page(case_detail, title="Case detail", icon="🔎")
-risk_page = st.Page(at_risk, title="Upcoming at risk", icon="🔮")
-dash_page = st.Page(dashboard, title="Dashboard", icon="📊")
+LOGO_SVG = (
+    '<svg xmlns="http://www.w3.org/2000/svg" width="150" height="40" viewBox="0 0 150 40">'
+    '<rect x="0" y="6" width="28" height="28" rx="7" fill="#0B6E63"/>'
+    '<path d="M8 20.5l4.5 4.5L21 15" fill="none" stroke="#FFFFFF" stroke-width="3" '
+    'stroke-linecap="round" stroke-linejoin="round"/>'
+    '<text x="38" y="28" font-family="Helvetica, Arial, sans-serif" font-size="22" font-weight="700" '
+    'fill="#FFFFFF">Pay<tspan fill="#5FD3C3">Fix</tspan></text></svg>'
+)
+st.logo("data:image/svg+xml;base64," + base64.b64encode(LOGO_SVG.encode()).decode(), size="large")
+
+sim_page = st.Page(simulation, title="Live simulation", icon=":material/play_circle:", default=True)
+queue_page = st.Page(queue, title="Failed payments", icon=":material/inbox:")
+case_page = st.Page(case_detail, title="Case detail", icon=":material/fact_check:")
+risk_page = st.Page(at_risk, title="Upcoming at risk", icon=":material/event_upcoming:")
+dash_page = st.Page(dashboard, title="Dashboard", icon=":material/monitoring:")
 
 with st.sidebar:
-    st.markdown("### Pay**Fix**")
+    st.markdown('<div class="pf-tag">Investigate. Validate. Resolve.</div>', unsafe_allow_html=True)
     if agent.available(st.secrets):
         st.toggle("Use Gemini agent", value=True, key="use_ai",
                   help="Off = use the offline rule-based agent. Useful if you hit the free-tier limit.")
@@ -620,4 +702,5 @@ with st.sidebar:
 if st.session_state.get("toast"):
     st.toast(st.session_state.pop("toast"), icon="✅")
 
-st.navigation([sim_page, risk_page, queue_page, case_page, dash_page]).run()
+st.navigation({"Demo": [sim_page], "Operations": [risk_page, queue_page, case_page],
+               "Insights": [dash_page]}).run()
